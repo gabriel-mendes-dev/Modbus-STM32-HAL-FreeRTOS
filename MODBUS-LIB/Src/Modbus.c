@@ -7,16 +7,12 @@
  */
 
 #include "FreeRTOS.h"
-#include "cmsis_os.h"
 #include "task.h"
 #include "queue.h"
 #include "main.h"
 #include "Modbus.h"
 #include "timers.h"
 #include "semphr.h"
-
-
-
 
 #if ENABLE_TCP == 1
 #include "api.h"
@@ -36,25 +32,76 @@
 #define lowByte(w) ((w) & 0xff)
 #define highByte(w) ((w) >> 8)
 
+#ifdef USE_VANILLA_FREERTOS
+    #define MODBUS_TASK_PRIORITY (configMAX_PRIORITIES - 3)
+#endif
+
+#ifdef USE_VANILLA_FREERTOS
+    /// Attributes structure for thread.
+    typedef struct {
+      const char                   *name;   ///< name of the thread
+      uint32_t                 attr_bits;   ///< attribute bits
+      void                      *cb_mem;    ///< memory for control block
+      uint32_t                   cb_size;   ///< size of provided memory for control block
+      void                   *stack_mem;    ///< memory for stack
+      uint32_t                stack_size;   ///< size of stack
+      uint32_t                  priority;   ///< initial thread priority
+      uint32_t            tz_module;   ///< TrustZone module identifier
+      uint32_t                  reserved;   ///< reserved (must be 0)
+    } osThreadAttr_t;
+    /// Attributes structure for message queue.
+    typedef struct {
+      const char                   *name;   ///< name of the message queue
+      uint32_t                 attr_bits;   ///< attribute bits
+      void                      *cb_mem;    ///< memory for control block
+      uint32_t                   cb_size;   ///< size of provided memory for control block
+      void                      *mq_mem;    ///< memory for data storage
+      uint32_t                   mq_size;   ///< size of provided memory for data storage
+    } osMessageQueueAttr_t;
+    /// Attributes structure for semaphore.
+    typedef struct {
+      const char                   *name;   ///< name of the semaphore
+      uint32_t                 attr_bits;   ///< attribute bits
+      void                      *cb_mem;    ///< memory for control block
+      uint32_t                   cb_size;   ///< size of provided memory for control block
+    } osSemaphoreAttr_t;
+#endif
 
 modbusHandler_t *mHandlers[MAX_M_HANDLERS];
 
 
 ///Queue Modbus telegrams for master
-const osMessageQueueAttr_t QueueTelegram_attributes = {
-       .name = "QueueModbusTelegram"
-};
+#ifdef USE_VANILLA_FREERTOS
+    const osMessageQueueAttr_t QueueTelegram_attributes = {
+           .name = "QueueModbusTelegram"
+    };
+#else
+    const osMessageQueueAttr_t QueueTelegram_attributes = {
+           .name = "QueueModbusTelegram"
+    };
+#endif
+
+
+
 
 
 const osThreadAttr_t myTaskModbusA_attributes = {
     .name = "TaskModbusSlave",
+#ifdef USE_VANILLA_FREERTOS
+    .priority = MODBUS_TASK_PRIORITY,
+#else
     .priority = (osPriority_t) osPriorityNormal,
+#endif
     .stack_size = 128 * 4
 };
 
 const osThreadAttr_t myTaskModbusA_attributesTCP = {
     .name = "TaskModbusSlave",
+#ifdef USE_VANILLA_FREERTOS
+    .priority = MODBUS_TASK_PRIORITY,
+#else
     .priority = (osPriority_t) osPriorityNormal,
+#endif
     .stack_size = 256 * 4
 };
 
@@ -64,14 +111,22 @@ const osThreadAttr_t myTaskModbusA_attributesTCP = {
 //osThreadId_t myTaskModbusAHandle;
 const osThreadAttr_t myTaskModbusB_attributes = {
     .name = "TaskModbusMaster",
+#ifdef USE_VANILLA_FREERTOS
+    .priority = MODBUS_TASK_PRIORITY,
+#else
     .priority = (osPriority_t) osPriorityNormal,
+#endif
     .stack_size = 128 * 4
 };
 
 
 const osThreadAttr_t myTaskModbusB_attributesTCP = {
     .name = "TaskModbusMaster",
+#ifdef USE_VANILLA_FREERTOS
+    .priority = MODBUS_TASK_PRIORITY,
+#else
     .priority = (osPriority_t) osPriorityNormal,
+#endif
     .stack_size = 256 * 4
 };
 
@@ -223,7 +278,12 @@ void ModbusInit(modbusHandler_t * modH)
 			  modH->myTaskModbusAHandle = osThreadNew(StartTaskModbusSlave, modH, &myTaskModbusA_attributes);
 		  }
 #else
-		  modH->myTaskModbusAHandle = osThreadNew(StartTaskModbusSlave, modH, &myTaskModbusA_attributes);
+    #ifdef USE_VANILLA_FREERTOS
+          xTaskCreate(StartTaskModbusSlave, myTaskModbusA_attributes.name, myTaskModbusA_attributes.stack_size, modH, myTaskModbusA_attributes.priority, &(modH->myTaskModbusAHandle));
+    #else
+          modH->myTaskModbusAHandle = osThreadNew(StartTaskModbusSlave, modH, &myTaskModbusA_attributes);
+    #endif
+
 #endif
 
 
@@ -242,7 +302,11 @@ void ModbusInit(modbusHandler_t * modH)
 		     modH->myTaskModbusAHandle = osThreadNew(StartTaskModbusMaster, modH, &myTaskModbusB_attributes);
 		  }
 #else
-		  modH->myTaskModbusAHandle = osThreadNew(StartTaskModbusMaster, modH, &myTaskModbusB_attributes);
+    #ifdef USE_VANILLA_FREERTOS
+          xTaskCreate(StartTaskModbusMaster, myTaskModbusB_attributes.name, myTaskModbusB_attributes.stack_size, modH, myTaskModbusB_attributes.priority, &(modH->myTaskModbusAHandle));
+    #else
+          modH->myTaskModbusAHandle = osThreadNew(StartTaskModbusMaster, modH, &myTaskModbusB_attributes);
+    #endif
 #endif
 
 
@@ -259,8 +323,13 @@ void ModbusInit(modbusHandler_t * modH)
 			  while(1); //error creating timer, check heap and stack size
 		  }
 
+    #ifdef USE_VANILLA_FREERTOS
+		  modH->QueueTelegramHandle = xQueueCreate(MAX_TELEGRAMS, sizeof(modbus_t));
+    #else
+          modH->QueueTelegramHandle = osMessageQueueNew (MAX_TELEGRAMS, sizeof(modbus_t), &QueueTelegram_attributes);
+    #endif
 
-		  modH->QueueTelegramHandle = osMessageQueueNew (MAX_TELEGRAMS, sizeof(modbus_t), &QueueTelegram_attributes);
+
 
 		  if(modH->QueueTelegramHandle == NULL)
 		  {
@@ -290,8 +359,11 @@ void ModbusInit(modbusHandler_t * modH)
 		  while(1); //Error creating the timer, check heap and stack size
 	  }
 
-
+#ifdef USE_VANILLA_FREERTOS
+	  modH->ModBusSphrHandle = xSemaphoreCreateCounting(1,1);
+#else
 	  modH->ModBusSphrHandle = osSemaphoreNew(1, 1, &ModBusSphr_attributes);
+#endif
 
 	  if(modH->ModBusSphrHandle == NULL)
 	  {
@@ -773,8 +845,12 @@ void ModbusQuery(modbusHandler_t * modH, modbus_t telegram )
 	//Add the telegram to the TX tail Queue of Modbus
 	if (modH->uModbusType == MB_MASTER)
 	{
-	telegram.u32CurrentTask = (uint32_t *) osThreadGetId();
-	xQueueSendToBack(modH->QueueTelegramHandle, &telegram, 0);
+#ifdef USE_VANILLA_FREERTOS
+	    telegram.u32CurrentTask = (uint32_t *) xTaskGetCurrentTaskHandle();
+#else
+	    telegram.u32CurrentTask = (uint32_t *) osThreadGetId();
+#endif
+        xQueueSendToBack(modH->QueueTelegramHandle, &telegram, 0);
 	}
 	else{
 		while(1);// error a slave cannot send queries as a master
@@ -787,7 +863,11 @@ void ModbusQueryInject(modbusHandler_t * modH, modbus_t telegram )
 {
 	//Add the telegram to the TX head Queue of Modbus
 	xQueueReset(modH->QueueTelegramHandle);
-	telegram.u32CurrentTask = (uint32_t *) osThreadGetId();
+#ifdef USE_VANILLA_FREERTOS
+    telegram.u32CurrentTask = (uint32_t *) xTaskGetCurrentTaskHandle();
+#else
+    telegram.u32CurrentTask = (uint32_t *) osThreadGetId();
+#endif
 	xQueueSendToFront(modH->QueueTelegramHandle, &telegram, 0);
 }
 

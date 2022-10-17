@@ -8,15 +8,14 @@
 #ifndef THIRD_PARTY_MODBUS_INC_MODBUS_H_
 #define THIRD_PARTY_MODBUS_INC_MODBUS_H_
 
-
 #include "ModbusConfig.h"
 #include <inttypes.h>
 #include <stdbool.h>
 #include "FreeRTOS.h"
-#include "cmsis_os.h"
 #include "task.h"
 #include "queue.h"
 #include "timers.h"
+#include "semphr.h"
 
 
 typedef enum
@@ -192,16 +191,30 @@ typedef struct
 	//FreeRTOS components
 
 	//Queue Modbus Telegram
-	osMessageQueueId_t QueueTelegramHandle;
+#ifdef USE_VANILLA_FREERTOS
+	QueueHandle_t QueueTelegramHandle;
+#else
+    osMessageQueueId_t QueueTelegramHandle;
+#endif
 
 	//Task Modbus slave
+#ifdef USE_VANILLA_FREERTOS
+	TaskHandle_t myTaskModbusAHandle;
+#else
 	osThreadId_t myTaskModbusAHandle;
+#endif
+
 	//Timer RX Modbus
 	xTimerHandle xTimerT35;
 	//Timer MasterTimeout
 	xTimerHandle xTimerTimeout;
 	//Semaphore for Modbus data
-	osSemaphoreId_t ModBusSphrHandle;
+#ifdef USE_VANILLA_FREERTOS
+    SemaphoreHandle_t ModBusSphrHandle;
+#else
+    osSemaphoreId_t ModBusSphrHandle;
+#endif
+
 	// RX ring buffer for USART
 	modbusRingBuffer_t xBufferRX;
 	// type of hardware  TCP, USB CDC, USART
