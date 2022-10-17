@@ -5,12 +5,17 @@
  *      Author: Alejandro Mera
  */
 
+#include "ModbusConfig.h"
+#ifdef USE_VANILLA_FREERTOS
 #include "FreeRTOS.h"
+#else
 #include "cmsis_os.h"
+#endif
 #include "task.h"
 #include "main.h"
 #include "Modbus.h"
 
+extern void otherUartRxCallbacks(UART_HandleTypeDef *UartHandle);
 
 /**
  * @brief
@@ -59,34 +64,33 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
  */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *UartHandle)
 {
-	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
-	/* Modbus RTU RX callback BEGIN */
+    /* Modbus RTU RX callback BEGIN */
     int i;
     for (i = 0; i < numberHandlers; i++ )
     {
-    	if (mHandlers[i]->port == UartHandle  )
-    	{
+        if (mHandlers[i]->port == UartHandle  )
+        {
 
-    		if(mHandlers[i]->xTypeHW == USART_HW)
-    		{
-    			RingAdd(&mHandlers[i]->xBufferRX, mHandlers[i]->dataRX);
-    			HAL_UART_Receive_IT(mHandlers[i]->port, &mHandlers[i]->dataRX, 1);
-    			xTimerResetFromISR(mHandlers[i]->xTimerT35, &xHigherPriorityTaskWoken);
-    		}
-    		break;
-    	}
+            if(mHandlers[i]->xTypeHW == USART_HW)
+            {
+                RingAdd(&mHandlers[i]->xBufferRX, mHandlers[i]->dataRX);
+                HAL_UART_Receive_IT(mHandlers[i]->port, &mHandlers[i]->dataRX, 1);
+                xTimerResetFromISR(mHandlers[i]->xTimerT35, &xHigherPriorityTaskWoken);
+            }
+            break;
+        }
     }
     portYIELD_FROM_ISR( xHigherPriorityTaskWoken );
-
-	/* Modbus RTU RX callback END */
+    /* Modbus RTU RX callback END */
 
 	/*
 	 * Here you should implement the callback code for other UARTs not used by Modbus
 	 *
 	 *
 	 * */
-
+    otherUartRxCallbacks(UartHandle);
 }
 
 
